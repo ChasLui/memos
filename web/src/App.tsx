@@ -1,34 +1,32 @@
 import { useColorScheme } from "@mui/joy";
-import { useEffect, Suspense } from "react";
+import { observer } from "mobx-react-lite";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { RouterProvider } from "react-router-dom";
-import router from "./router";
-import { useLocationStore, useGlobalStore } from "./store/module";
-import * as storage from "./helpers/storage";
+import { Outlet } from "react-router-dom";
 import { getSystemColorScheme } from "./helpers/utils";
-import Loading from "./pages/Loading";
+import useNavigateTo from "./hooks/useNavigateTo";
+import { userStore, workspaceStore } from "./store/v2";
 
-const App = () => {
+const App = observer(() => {
   const { i18n } = useTranslation();
-  const globalStore = useGlobalStore();
-  const locationStore = useLocationStore();
+  const navigateTo = useNavigateTo();
   const { mode, setMode } = useColorScheme();
-  const { appearance, locale, systemStatus } = globalStore.state;
+  const workspaceProfile = workspaceStore.state.profile;
+  const userSetting = userStore.state.userSetting;
+  const workspaceGeneralSetting = workspaceStore.state.generalSetting;
 
+  // Redirect to sign up page if no instance owner.
   useEffect(() => {
-    locationStore.updateStateWithLocation();
-    window.onpopstate = () => {
-      locationStore.updateStateWithLocation();
-    };
-  }, []);
+    if (!workspaceProfile.owner) {
+      navigateTo("/auth/signup");
+    }
+  }, [workspaceProfile.owner]);
 
   useEffect(() => {
     const darkMediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
     const handleColorSchemeChange = (e: MediaQueryListEvent) => {
-      if (globalStore.getState().appearance === "system") {
-        const mode = e.matches ? "dark" : "light";
-        setMode(mode);
-      }
+      const mode = e.matches ? "dark" : "light";
+      setMode(mode);
     };
 
     try {
@@ -42,46 +40,53 @@ const App = () => {
     }
   }, []);
 
-  // Inject additional style and script codes.
   useEffect(() => {
-    if (systemStatus.additionalStyle) {
+    if (workspaceGeneralSetting.additionalStyle) {
       const styleEl = document.createElement("style");
-      styleEl.innerHTML = systemStatus.additionalStyle;
+      styleEl.innerHTML = workspaceGeneralSetting.additionalStyle;
       styleEl.setAttribute("type", "text/css");
       document.body.insertAdjacentElement("beforeend", styleEl);
     }
-    if (systemStatus.additionalScript) {
+  }, [workspaceGeneralSetting.additionalStyle]);
+
+  useEffect(() => {
+    if (workspaceGeneralSetting.additionalScript) {
       const scriptEl = document.createElement("script");
-      scriptEl.innerHTML = systemStatus.additionalScript;
+      scriptEl.innerHTML = workspaceGeneralSetting.additionalScript;
       document.head.appendChild(scriptEl);
     }
+  }, [workspaceGeneralSetting.additionalScript]);
 
-    // dynamic update metadata with customized profile.
-    document.title = systemStatus.customizedProfile.name;
-    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-    link.href = systemStatus.customizedProfile.logoUrl || "/logo.png";
-  }, [systemStatus]);
-
+  // Dynamic update metadata with customized profile.
   useEffect(() => {
-    document.documentElement.setAttribute("lang", locale);
-    i18n.changeLanguage(locale);
-    storage.set({
-      locale: locale,
-    });
-  }, [locale]);
-
-  useEffect(() => {
-    storage.set({
-      appearance: appearance,
-    });
-
-    let currentAppearance = appearance;
-    if (appearance === "system") {
-      currentAppearance = getSystemColorScheme();
+    if (!workspaceGeneralSetting.customProfile) {
+      return;
     }
 
+    document.title = workspaceGeneralSetting.customProfile.title;
+    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+    link.href = workspaceGeneralSetting.customProfile.logoUrl || "/logo.webp";
+  }, [workspaceGeneralSetting.customProfile]);
+
+  useEffect(() => {
+    const currentLocale = workspaceStore.state.locale;
+    // This will trigger re-rendering of the whole app.
+    i18n.changeLanguage(currentLocale);
+    document.documentElement.setAttribute("lang", currentLocale);
+    if (["ar", "fa"].includes(currentLocale)) {
+      document.documentElement.setAttribute("dir", "rtl");
+    } else {
+      document.documentElement.setAttribute("dir", "ltr");
+    }
+  }, [workspaceStore.state.locale]);
+
+  useEffect(() => {
+    let currentAppearance = workspaceStore.state.appearance as Appearance;
+    if (currentAppearance === "system") {
+      currentAppearance = getSystemColorScheme();
+    }
     setMode(currentAppearance);
-  }, [appearance]);
+  }, [workspaceStore.state.appearance]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -92,11 +97,18 @@ const App = () => {
     }
   }, [mode]);
 
-  return (
-    <Suspense fallback={<Loading />}>
-      <RouterProvider router={router} />
-    </Suspense>
-  );
-};
+  useEffect(() => {
+    if (!userSetting) {
+      return;
+    }
+
+    workspaceStore.state.setPartial({
+      locale: userSetting.locale || workspaceStore.state.locale,
+      appearance: userSetting.appearance || workspaceStore.state.appearance,
+    });
+  }, [userSetting?.locale, userSetting?.appearance]);
+
+  return <Outlet />;
+});
 
 export default App;
